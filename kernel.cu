@@ -200,7 +200,7 @@ void fill( int base, int* a, size_t size)
         a[i] = base + i;
 }
 
-// Helper function for using CUDA to add vectors in parallel.
+// Helper function for using CUDA to process vectors in parallel.
 __host__
 cudaError_t carousel( 
     int* hst_a, int* hst_d, 
@@ -208,6 +208,11 @@ cudaError_t carousel(
     unsigned int size, unsigned int repeat )
 {
     cudaError_t cudaStatus;
+    cudaEvent_t startEvent, stopEvent;
+    cudaEventCreate(&startEvent);
+    cudaEventCreate(&stopEvent);
+
+    cudaEventRecord(startEvent, 0);
 
     cudaStream_t sX, sY, sI, sO;
     cudaStreamCreate( &sX );
@@ -267,6 +272,15 @@ Error:
     cudaStreamDestroy( sY );
     cudaStreamDestroy( sI );
     cudaStreamDestroy( sO );
+
+    cudaEventRecord(stopEvent, 0);
+    cudaEventSynchronize(stopEvent);
+    float ms; // elapsed time in milliseconds
+    cudaEventElapsedTime(&ms, startEvent, stopEvent);
+    fprintf(stderr, "Time for carousel execute #%d: %.3f us (%.3f us/cycle)\n", repeat, ms*1000., ms*1000./repeat );
+    cudaEventDestroy(startEvent);
+    cudaEventDestroy(stopEvent);
+
     return cudaStatus;
 }
 
@@ -291,6 +305,13 @@ int main()
         fprintf(stderr, "setup device %d failed %u\n", device, cudaStatus);
         return 1;
     }
+
+    cudaEvent_t startEvent, stopEvent;
+    cudaEventCreate(&startEvent);
+    cudaEventCreate(&stopEvent);
+
+    cudaEventRecord(startEvent, 0);
+
     cudaStatus = alloc( &a, &d, &dev_a, &dev_b, &dev_c, &dev_d, arraySize );
     if (cudaStatus != cudaSuccess) 
     {
@@ -309,7 +330,7 @@ int main()
     }
 
     // Add-then-subtract vectors in parallel.
-    cudaStatus = carousel( a, d, dev_a, dev_b, dev_c, dev_d, arraySize, 10 );
+    cudaStatus = carousel( a, d, dev_a, dev_b, dev_c, dev_d, arraySize, 1000 );
     if (cudaStatus != cudaSuccess) 
     {
         fprintf(stderr, "carousel failed %u\n", cudaStatus);
@@ -333,12 +354,22 @@ int main()
 
     //TODO compare
 
-    printf("Result:\nA={%3d,%3d,%3d,%3d,%3d}\nB={%3d,%3d,%3d,%3d,%3d}\nC={%3d,%3d,%3d,%3d,%3d}\nD={%3d,%3d,%3d,%3d,%3d}\n",
-        tst_a[0], tst_a[1], tst_a[2], tst_a[3], tst_a[4],
-        tst_b[0], tst_b[1], tst_b[2], tst_b[3], tst_b[4],
-        tst_c[0], tst_c[1], tst_c[2], tst_c[3], tst_c[4],
-        tst_d[0], tst_d[1], tst_d[2], tst_d[3], tst_d[4]
-        );
+    cudaEventRecord(stopEvent, 0);
+    cudaEventSynchronize(stopEvent);
+    float ms; // elapsed time in milliseconds
+    cudaEventElapsedTime(&ms, startEvent, stopEvent);
+    fprintf(stderr, "Time for the test execute: %.3f ms\n", ms);
+    cudaEventDestroy(startEvent);
+    cudaEventDestroy(stopEvent);
+
+    const char* fmt = "Result: %c={%4d,%4d,%4d,%4d,%4d}\n";
+    printf(fmt, 'A', tst_a[0], tst_a[1], tst_a[2], tst_a[3], tst_a[4]);
+    printf(fmt, 'B', tst_b[0], tst_b[1], tst_b[2], tst_b[3], tst_b[4]);
+    printf(fmt, 'C', tst_c[0], tst_c[1], tst_c[2], tst_c[3], tst_c[4]);
+    printf(fmt, 'D', tst_d[0], tst_d[1], tst_d[2], tst_d[3], tst_d[4]);
+
+    releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
+    releaseOnHost( a, d, tst_a, tst_b, tst_c, tst_d );
 
     // cudaDeviceReset must be called before exiting in order for profiling and
     // tracing tools such as Nsight and Visual Profiler to show complete traces.
@@ -350,7 +381,5 @@ int main()
         return 6;
     }
 
-    releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
-    releaseOnHost( a, d, tst_a, tst_b, tst_c, tst_d );
     return 0;
 }
