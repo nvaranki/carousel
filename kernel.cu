@@ -1,4 +1,4 @@
-﻿
+
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
@@ -33,69 +33,92 @@ cudaError_t setup(int dn)
 }
 
 __host__
-cudaError_t alloc( int** dev_a, int** dev_b, int** dev_c, size_t size )
+cudaError_t alloc( int** a, int** d, int** dev_a, int** dev_b, int** dev_c, int** dev_d, size_t size )
 {
     cudaError_t cudaStatus;
 
-    // Allocate GPU buffers for three vectors (two input, one output)    .
-    cudaStatus = cudaMalloc((void**)dev_c, size * sizeof(int));
-    if (cudaStatus != cudaSuccess) 
+    // Allocate host buffers for two vectors
+
+    cudaStatus = cudaMallocHost( a, size * sizeof(int) );// in page-locked memory
+    if (cudaStatus != cudaSuccess)
     {
-        fprintf(stderr, "cudaMalloc failed!");
+        fprintf(stderr, "alloc host A failed %u\n", cudaStatus);
         return cudaStatus;
     }
+
+    cudaStatus = cudaMallocHost( d, size * sizeof(int) );// in page-locked memory
+    if (cudaStatus != cudaSuccess)
+    {
+        fprintf(stderr, "alloc host D failed %u\n", cudaStatus);
+        return cudaStatus;
+    }
+
+    // Allocate GPU buffers for three vectors
 
     cudaStatus = cudaMalloc((void**)dev_a, size * sizeof(int));
     if (cudaStatus != cudaSuccess) 
     {
-        fprintf(stderr, "cudaMalloc failed!");
+        fprintf(stderr, "cudaMalloc device A failed!");
         return cudaStatus;
     }
 
     cudaStatus = cudaMalloc((void**)dev_b, size * sizeof(int));
     if (cudaStatus != cudaSuccess) 
     {
-        fprintf(stderr, "cudaMalloc failed!");
+        fprintf(stderr, "cudaMalloc device B failed!");
         return cudaStatus;
     }
+
+    cudaStatus = cudaMalloc((void**)dev_c, size * sizeof(int));
+    if (cudaStatus != cudaSuccess) 
+    {
+        fprintf(stderr, "cudaMalloc device C failed!");
+        return cudaStatus;
+    }
+
+    cudaStatus = cudaMalloc((void**)dev_d, size * sizeof(int));
+    if (cudaStatus != cudaSuccess)
+    {
+        fprintf(stderr, "cudaMalloc device D failed!");
+        return cudaStatus;
+    }
+
     return cudaStatus;
 }
 
 __host__
-void release( int* dev_a, int* dev_b, int* dev_c )
+void releaseOnDevice( int* dev_a, int* dev_b, int* dev_c, int* dev_d )
 {
-    cudaError_t cudaStatus;
-
-    cudaFree(dev_c);
     cudaFree(dev_a);
     cudaFree(dev_b);
+    cudaFree(dev_c);
+    cudaFree(dev_d);
 }
 
 __host__
-void release( int* dev_a, int* dev_b, int* dev_c, int* hst_a, int* hst_b, int* hst_c )
+void releaseOnHost( int* hst_a, int* hst_d )
 {
-    cudaFree(dev_c);
-    cudaFree(dev_a);
-    cudaFree(dev_b);
-    
-    delete[] hst_a;
-    delete[] hst_b;
-    delete[] hst_c;
+    cudaFreeHost(hst_a);
+    cudaFreeHost(hst_d);
 }
 
 __host__
-cudaError_t upload( const int* hst_a, const int* hst_b, int* dev_a, int* dev_b, size_t size )
+void releaseOnHost( int* hst_a, int* hst_d, int* tst_a, int* tst_b, int* tst_c, int* tst_d )
+{
+    cudaFreeHost(hst_a);
+    cudaFreeHost(hst_d);
+    delete[] tst_a;
+    delete[] tst_b;
+    delete[] tst_c;
+    delete[] tst_d;
+}
+
+__host__
+cudaError_t upload( const int* hst_b, int* dev_b, size_t size )
 {
     cudaError_t cudaStatus;
 
     // Copy input vectors from host memory to GPU buffers.
-    cudaStatus = cudaMemcpy( dev_a, hst_a, size * sizeof(int), cudaMemcpyHostToDevice );
-    if (cudaStatus != cudaSuccess) 
-    {
-        fprintf(stderr, "cudaMemcpy A failed!\n");
-        return cudaStatus;
-    }
-
     cudaStatus = cudaMemcpy( dev_b, hst_b, size * sizeof(int), cudaMemcpyHostToDevice );
     if (cudaStatus != cudaSuccess) 
     {
@@ -106,11 +129,28 @@ cudaError_t upload( const int* hst_a, const int* hst_b, int* dev_a, int* dev_b, 
 }
 
 __host__
-cudaError_t download( int* hst_a, int* hst_b, int* hst_c, int* dev_a, int* dev_b, int* dev_c, size_t size )
+cudaError_t upload( const int* hst_a, int* dev_a, size_t size, cudaStream_t stream )
 {
     cudaError_t cudaStatus;
 
-    // Copy input vectors from GPU buffer to host memory.
+    // Copy input vectors from host memory to GPU buffers.
+    cudaStatus = cudaMemcpyAsync( dev_a, hst_a, size * sizeof(int), cudaMemcpyHostToDevice, stream );
+    if (cudaStatus != cudaSuccess) 
+    {
+        fprintf(stderr, "cudaMemcpy A failed!\n");
+        return cudaStatus;
+    }
+    return cudaStatus;
+}
+
+__host__
+cudaError_t download( 
+    int* hst_a, int* hst_b, int* hst_c, int* hst_d, 
+    int* dev_a, int* dev_b, int* dev_c, int* dev_d, size_t size )
+{
+    cudaError_t cudaStatus;
+
+    // Copy vectors from GPU buffer to host memory.
     cudaStatus = cudaMemcpy( hst_a, dev_a, size * sizeof(int), cudaMemcpyDeviceToHost );
     if (cudaStatus != cudaSuccess) 
     {
@@ -123,28 +163,88 @@ cudaError_t download( int* hst_a, int* hst_b, int* hst_c, int* dev_a, int* dev_b
         fprintf(stderr, "cudaMemcpy B failed!");
         return cudaStatus;
     }
-    // Copy output vector from GPU buffer to host memory.
     cudaStatus = cudaMemcpy( hst_c, dev_c, size * sizeof(int), cudaMemcpyDeviceToHost );
     if (cudaStatus != cudaSuccess) 
     {
         fprintf(stderr, "cudaMemcpy C failed!");
         return cudaStatus;
     }
+    cudaStatus = cudaMemcpy( hst_d, dev_d, size * sizeof(int), cudaMemcpyDeviceToHost );
+    if (cudaStatus != cudaSuccess) 
+    {
+        fprintf(stderr, "cudaMemcpy D failed!");
+        return cudaStatus;
+    }
     return cudaStatus;
+}
+
+__host__
+cudaError_t download( int* hst_a, int* dev_a, size_t size, cudaStream_t stream )
+{
+    cudaError_t cudaStatus;
+
+    // Copy input vectors from GPU buffer to host memory.
+    cudaStatus = cudaMemcpyAsync( hst_a, dev_a, size * sizeof(int), cudaMemcpyDeviceToHost, stream );
+    if (cudaStatus != cudaSuccess) 
+    {
+        fprintf(stderr, "cudaMemcpy A failed!");
+        return cudaStatus;
+    }
+    return cudaStatus;
+}
+
+__host__
+void fill( int base, int* a, size_t size)
+{
+    for (int i = 0; i < size; i++)
+        a[i] = base + i;
 }
 
 // Helper function for using CUDA to add vectors in parallel.
 __host__
-cudaError_t carousel( int* dev_a, int* dev_b, int* dev_c, unsigned int size, unsigned int repeat )
+cudaError_t carousel( 
+    int* hst_a, int* hst_d, 
+    int* dev_a, int* dev_b, int* dev_c, int* dev_d, 
+    unsigned int size, unsigned int repeat )
 {
     cudaError_t cudaStatus;
 
-    for( int i = 0; i < repeat; i++ )
+    cudaStream_t sX, sY, sI, sO;
+    cudaStreamCreate( &sX );
+    cudaStreamCreate( &sY );
+    cudaStreamCreate( &sI );
+    cudaStreamCreate( &sO );
+
+    // Launch synchronized streams on the GPU with one thread for each element.
+    for( unsigned int i = 0; i < repeat; i++ )
     {
-        // Launch a kernel on the GPU with one thread for each element.
-        kAdd <<<1,size>>> (dev_c, dev_a, dev_b); // dev_c = dev_a + dev_b
-        kSub <<<1,size>>> (dev_a, dev_c, dev_b); // dev_a = dev_c - dev_b
+        // I:            ↓X fill upload            ↓X fill upload 
+        // X: ↑I ↓Y kAdd                ↑I ↓Y kAdd
+        // Y:            ↓O ↑X kSub                ↓O ↑X kSub 
+        // O:                       ↑Y download               ↑Y download 
+
+        // get and upload next input
+        cudaStreamSynchronize( sX );
+        fill( i, hst_a, size ); //TODO get new input data
+        upload( hst_a, dev_a, size, sI );
+
+        // dev_c = dev_a + dev_b
+        cudaStreamSynchronize( sI );
+        cudaStreamSynchronize( sY );
+        kAdd <<<1,size,0,sX>>> (dev_c, dev_a, dev_b); 
+        
+        // dev_d = dev_c - dev_b
+        cudaStreamSynchronize( sO );
+        cudaStreamSynchronize( sX );
+        kSub <<<1,size,0,sY>>> (dev_d, dev_c, dev_b); 
+        
+        // download last result
+        cudaStreamSynchronize( sY );
+        download( hst_d, dev_d, size, sO );
+        //TODO signal out the hst_d is ready
     }
+    cudaDeviceSynchronize(); // waits until all streams finished
+
     // Check for any errors launching the kernel
     cudaStatus = cudaGetLastError();
     if (cudaStatus != cudaSuccess) 
@@ -162,7 +262,11 @@ cudaError_t carousel( int* dev_a, int* dev_b, int* dev_c, unsigned int size, uns
         goto Error;
     }
 
-    Error:
+Error:
+    cudaStreamDestroy( sX );
+    cudaStreamDestroy( sY );
+    cudaStreamDestroy( sI );
+    cudaStreamDestroy( sO );
     return cudaStatus;
 }
 
@@ -171,19 +275,14 @@ int main()
 {
     const int device = 0;
     const int arraySize = 5;
-    const int a[arraySize] = { 1, 2, 3, 4, 5 };
+    int* a; // input
     const int b[arraySize] = { 10, 20, 30, 40, 50 };
-    int c[arraySize] = { 0 };
+    int* d; // output
     int* dev_a = nullptr;
     int* dev_b = nullptr;
     int* dev_c = nullptr;
+    int* dev_d = nullptr;
     cudaError_t cudaStatus = cudaErrorUnknown;
-    
-    printf("Source:\nA={%3d,%3d,%3d,%3d,%3d}\nB={%3d,%3d,%3d,%3d,%3d}\nC={%3d,%3d,%3d,%3d,%3d}\n",
-        a[0], a[1], a[2], a[3], a[4],
-        b[0], b[1], b[2], b[3], b[4],
-        c[0], c[1], c[2], c[3], c[4]
-    );
 
     // Setup and prepare.
     cudaStatus = setup(device);
@@ -192,46 +291,53 @@ int main()
         fprintf(stderr, "setup device %d failed %u\n", device, cudaStatus);
         return 1;
     }
-    cudaStatus = alloc( &dev_a, &dev_b, &dev_c, arraySize );
+    cudaStatus = alloc( &a, &d, &dev_a, &dev_b, &dev_c, &dev_d, arraySize );
     if (cudaStatus != cudaSuccess) 
     {
         fprintf(stderr, "alloc failed %u\n", cudaStatus);
-        release( dev_a, dev_b, dev_c );
+        releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
+        releaseOnHost( a, d );
         return 2;
     }
-    cudaStatus = upload( a, b, dev_a, dev_b, arraySize );
+    cudaStatus = upload( b, dev_b, arraySize );
     if (cudaStatus != cudaSuccess) 
     {
         fprintf(stderr, "upload failed %u\n", cudaStatus);
-        release( dev_a, dev_b, dev_c );
+        releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
+        releaseOnHost( a, d );
         return 3;
     }
 
     // Add-then-subtract vectors in parallel.
-    cudaStatus = carousel( dev_a, dev_b, dev_c, arraySize, 1000 );
+    cudaStatus = carousel( a, d, dev_a, dev_b, dev_c, dev_d, arraySize, 10 );
     if (cudaStatus != cudaSuccess) 
     {
         fprintf(stderr, "carousel failed %u\n", cudaStatus);
+        releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
+        releaseOnHost( a, d );
         return 4;
     }
 
     int* tst_a = new int[arraySize];
     int* tst_b = new int[arraySize];
     int* tst_c = new int[arraySize];
-    cudaStatus = download( tst_a, tst_b, tst_c, dev_a, dev_b, dev_c, arraySize );
+    int* tst_d = new int[arraySize];
+    cudaStatus = download( tst_a, tst_b, tst_c, tst_d, dev_a, dev_b, dev_c, dev_d, arraySize );
     if (cudaStatus != cudaSuccess)
     {
         fprintf(stderr, "upload failed %u\n", cudaStatus);
-        release( dev_a, dev_b, dev_c, tst_a, tst_b, tst_c );
+        releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
+        releaseOnHost( a, d, tst_a, tst_b, tst_c, tst_d );
         return 5;
     }
 
     //TODO compare
 
-    printf("Result:\nA={%3d,%3d,%3d,%3d,%3d}\nB={%3d,%3d,%3d,%3d,%3d}\nC={%3d,%3d,%3d,%3d,%3d}\n",
+    printf("Result:\nA={%3d,%3d,%3d,%3d,%3d}\nB={%3d,%3d,%3d,%3d,%3d}\nC={%3d,%3d,%3d,%3d,%3d}\nD={%3d,%3d,%3d,%3d,%3d}\n",
         tst_a[0], tst_a[1], tst_a[2], tst_a[3], tst_a[4],
         tst_b[0], tst_b[1], tst_b[2], tst_b[3], tst_b[4],
-        tst_c[0], tst_c[1], tst_c[2], tst_c[3], tst_c[4]
+        tst_c[0], tst_c[1], tst_c[2], tst_c[3], tst_c[4],
+        tst_d[0], tst_d[1], tst_d[2], tst_d[3], tst_d[4]
         );
 
     // cudaDeviceReset must be called before exiting in order for profiling and
@@ -239,10 +345,12 @@ int main()
     cudaStatus = cudaDeviceReset();
     if (cudaStatus != cudaSuccess) {
         fprintf(stderr, "cudaDeviceReset failed!");
-        release( dev_a, dev_b, dev_c, tst_a, tst_b, tst_c );
+        releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
+        releaseOnHost( a, d, tst_a, tst_b, tst_c, tst_d );
         return 6;
     }
 
-    release( dev_a, dev_b, dev_c, tst_a, tst_b, tst_c );
+    releaseOnDevice( dev_a, dev_b, dev_c, dev_d );
+    releaseOnHost( a, d, tst_a, tst_b, tst_c, tst_d );
     return 0;
 }
