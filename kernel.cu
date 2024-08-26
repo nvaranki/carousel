@@ -275,7 +275,7 @@ cudaError_t carousel(
     cudaEventSynchronize(stopEvent);
     float ms; // elapsed time in milliseconds
     cudaEventElapsedTime(&ms, startEvent, stopEvent);
-    fprintf(stderr, "Time for carousel execute #%d: %.3f us (%.3f us/cycle)\n", repeat, ms*1000., ms*1000./repeat );
+    fprintf(stderr, "Time for carousel execute #%d: %.3f us (%.3f us/cycle,%.1f ns/cell)\n", repeat, ms*1000., ms*1000./repeat, ms*1000000./ size /repeat );
     cudaEventDestroy(startEvent);
     cudaEventDestroy(stopEvent);
 
@@ -335,7 +335,7 @@ int main()
     }
 
     // Add-then-subtract vectors in parallel.
-    cudaStatus = carousel( a, d, dev_a, dev_b, dev_c, dev_d, arraySize, 1024, 1000000 );
+    cudaStatus = carousel( a, d, dev_a, dev_b, dev_c, dev_d, arraySize, 1024, 100000 );
     if (cudaStatus != cudaSuccess) 
     {
         fprintf(stderr, "carousel failed %u\n", cudaStatus);
