@@ -3,6 +3,7 @@
 #include "device_launch_parameters.h"
 
 #include <stdio.h>
+#include <algorithm>
 
 __global__ 
 void kAdd(int *c, const int *a, const int *b)
@@ -205,20 +206,23 @@ __host__
 cudaError_t carousel( 
     int* hst_a, int* hst_d, 
     int* dev_a, int* dev_b, int* dev_c, int* dev_d, 
-    unsigned int size, unsigned int repeat )
+    const unsigned int size, const unsigned int ts, const unsigned int repeat )
 {
     cudaError_t cudaStatus;
     cudaEvent_t startEvent, stopEvent;
     cudaEventCreate(&startEvent);
     cudaEventCreate(&stopEvent);
 
-    cudaEventRecord(startEvent, 0);
-
     cudaStream_t sX, sY, sI, sO;
     cudaStreamCreate( &sX );
     cudaStreamCreate( &sY );
     cudaStreamCreate( &sI );
     cudaStreamCreate( &sO );
+
+    cudaEventRecord(startEvent, 0);
+
+    const unsigned int tse(std::max(1, std::min((int)ts, 1024)));
+    dim3 dg(std::max(1, (int)(size/tse))), db(std::min((int)tse, (int)size));
 
     // Launch synchronized streams on the GPU with one thread for each element.
     for( unsigned int i = 0; i < repeat; i++ )
@@ -236,12 +240,12 @@ cudaError_t carousel(
         // dev_c = dev_a + dev_b
         cudaStreamSynchronize( sI );
         cudaStreamSynchronize( sY );
-        kAdd <<<1,size,0,sX>>> (dev_c, dev_a, dev_b); 
+        kAdd <<<dg,db,0,sX>>> (dev_c, dev_a, dev_b); 
         
         // dev_d = dev_c - dev_b
         cudaStreamSynchronize( sO );
         cudaStreamSynchronize( sX );
-        kSub <<<1,size,0,sY>>> (dev_d, dev_c, dev_b); 
+        kSub <<<dg,db,0,sY>>> (dev_d, dev_c, dev_b);
         
         // download last result
         cudaStreamSynchronize( sY );
@@ -267,12 +271,6 @@ cudaError_t carousel(
         goto Error;
     }
 
-Error:
-    cudaStreamDestroy( sX );
-    cudaStreamDestroy( sY );
-    cudaStreamDestroy( sI );
-    cudaStreamDestroy( sO );
-
     cudaEventRecord(stopEvent, 0);
     cudaEventSynchronize(stopEvent);
     float ms; // elapsed time in milliseconds
@@ -281,6 +279,12 @@ Error:
     cudaEventDestroy(startEvent);
     cudaEventDestroy(stopEvent);
 
+Error:
+    cudaStreamDestroy( sX );
+    cudaStreamDestroy( sY );
+    cudaStreamDestroy( sI );
+    cudaStreamDestroy( sO );
+
     return cudaStatus;
 }
 
@@ -288,7 +292,8 @@ __host__
 int main()
 {
     const int device = 0;
-    const int arraySize = 5;
+    const int arraySize = /*5;/*/ 3 * 64 * 32; // 3 blocks to compute on 64*32=2048 cores
+    fprintf(stderr, "Array size: %d\n", arraySize);
     int* a; // input
     const int b[arraySize] = { 10, 20, 30, 40, 50 };
     int* d; // output
@@ -330,7 +335,7 @@ int main()
     }
 
     // Add-then-subtract vectors in parallel.
-    cudaStatus = carousel( a, d, dev_a, dev_b, dev_c, dev_d, arraySize, 1000 );
+    cudaStatus = carousel( a, d, dev_a, dev_b, dev_c, dev_d, arraySize, 1024, 1000000 );
     if (cudaStatus != cudaSuccess) 
     {
         fprintf(stderr, "carousel failed %u\n", cudaStatus);
