@@ -227,10 +227,10 @@ cudaError_t carousel(
     // Launch synchronized streams on the GPU with one thread for each element.
     for( unsigned int i = 0; i < repeat; i++ )
     {
-        // I:            ↓X fill upload            ↓X fill upload 
-        // X: ↑I ↓Y kAdd                ↑I ↓Y kAdd
-        // Y:            ↓O ↑X kSub                ↓O ↑X kSub 
-        // O:                       ↑Y download               ↑Y download 
+        // I: ↓X fill upload            ↓X fill upload            ↓X fill upload 
+        // X:                ↑I ↓Y kAdd                ↑I ↓Y kAdd                ↑I ↓Y kAdd
+        // Y:                           ↓O ↑X kSub                ↓O ↑X kSub                ↓O ↑X kSub
+        // O:                                      ↑Y download               ↑Y download               ↑Y download
 
         // get and upload next input
         cudaStreamSynchronize( sX );
