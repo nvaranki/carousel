@@ -227,30 +227,43 @@ cudaError_t carousel(
     // Launch synchronized streams on the GPU with one thread for each element.
     for( unsigned int i = 0; i < repeat; i++ )
     {
-        // I: ↓X fill upload            ↓X fill upload            ↓X fill upload 
-        // X:                ↑I ↓Y kAdd                ↑I ↓Y kAdd                ↑I ↓Y kAdd
-        // Y:                           ↓O ↑X kSub                ↓O ↑X kSub                ↓O ↑X kSub
-        // O:                                      ↑Y download               ↑Y download               ↑Y download
+        // I: ↓X fill upload₀            ↓X fill upload₁            ↓X fill upload₂           ...
+        // X:                ↑I ↓Y kAdd₀                ↑I ↓Y kAdd₁                ↑I ↓Y kAdd₂
+        // Y:                           ↓O ↑X kSub₀                ↓O ↑X kSub₁                ↓O ↑X kSub₂
+        // O:                                      ↑Y download₀               ↑Y download₁               ↑Y download₂
 
-        // get and upload next input
+        // I: get and upload next input
+        fprintf(stdout, "push %d\n", i);
         cudaStreamSynchronize( sX );
+        fprintf(stdout, "push %d (sX)\n", i);
         fill( i, hst_a, size ); //TODO get new input data
         upload( hst_a, dev_a, size, sI );
 
-        // dev_c = dev_a + dev_b
+        // X: dev_c = dev_a + dev_b
+        fprintf(stdout, "add  %d\n", i);
         cudaStreamSynchronize( sI );
+        fprintf(stdout, "add  %d (sI)\n", i);
         cudaStreamSynchronize( sY );
+        fprintf(stdout, "add  %d (sY)\n", i);
         kAdd <<<dg,db,0,sX>>> (dev_c, dev_a, dev_b); 
         
-        // dev_d = dev_c - dev_b
+        // Y: dev_d = dev_c - dev_b
+        fprintf(stdout, "sub  %d\n", i);
         cudaStreamSynchronize( sO );
+        fprintf(stdout, "sub  %d (sO)\n", i);
         cudaStreamSynchronize( sX );
+        fprintf(stdout, "sub  %d (sX)\n", i);
         kSub <<<dg,db,0,sY>>> (dev_d, dev_c, dev_b);
         
-        // download last result
+        // O: download last result
+        fprintf(stdout, "pull %d\n", i);
         cudaStreamSynchronize( sY );
+        fprintf(stdout, "pull %d (sY)\n", i);
         download( hst_d, dev_d, size, sO );
         //TODO signal out the hst_d is ready
+        cudaStreamSynchronize(sO);
+        const char* fmt = "Result: %c={%4d,%4d,%4d,%4d,%4d} - pull\n";
+        printf(fmt, 'D', hst_d[0], hst_d[1], hst_d[2], hst_d[3], hst_d[4]);
     }
     cudaDeviceSynchronize(); // waits until all streams finished
 
